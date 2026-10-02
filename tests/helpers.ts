@@ -14,6 +14,8 @@ export const MIGRATIONS: Migration[] = Object.entries(
 export interface TestDatabase {
   db: Db;
   conn: MigrationConn;
+  /** Another session on the same database, for concurrency tests. Real Postgres only. */
+  connect?: () => Promise<Db>;
 }
 
 // Set by CI (and optionally locally) to run every test against a real Postgres server instead of
@@ -71,7 +73,15 @@ export async function freshDatabase(): Promise<TestDatabase> {
     await admin.query(`DROP DATABASE IF EXISTS ${name}`);
     await admin.end();
   });
+  // Pushed after the drop above, so cleanup (which runs in reverse) closes these sessions first.
+  const connect = async (): Promise<Db> => {
+    const extra = new pg.Client({ connectionString: url.toString() });
+    await extra.connect();
+    cleanups.push(() => extra.end());
+    return { query: async <T>(text: string, params?: unknown[]) => (await extra.query<T>(text, params)).rows };
+  };
   return {
+    connect,
     db: { query: async <T>(text: string, params?: unknown[]) => (await client.query<T>(text, params)).rows },
     conn: {
       exec: async (sql) => void (await client.query(sql)),
@@ -82,6 +92,8 @@ export async function freshDatabase(): Promise<TestDatabase> {
 
 export interface Fixture {
   db: Db;
+  /** Another session on the same database. Only set on real Postgres. */
+  connect?: () => Promise<Db>;
   tenantId: string;
   otherTenantId: string;
   serviceId: string;
@@ -94,7 +106,7 @@ export interface Fixture {
  * (clocks spring forward on Sunday 2026-03-08).
  */
 export async function createFixture(): Promise<Fixture> {
-  const { db, conn } = await freshDatabase();
+  const { db, conn, connect } = await freshDatabase();
   await applyMigrations(conn, MIGRATIONS);
 
   const [tenant] = await db.query<{ id: string }>(
@@ -120,7 +132,14 @@ export async function createFixture(): Promise<Fixture> {
     [resource!.id],
   );
 
-  return { db, tenantId: tenant!.id, otherTenantId: other!.id, serviceId: service!.id, resourceId: resource!.id };
+  return {
+    db,
+    ...(connect ? { connect } : {}),
+    tenantId: tenant!.id,
+    otherTenantId: other!.id,
+    serviceId: service!.id,
+    resourceId: resource!.id,
+  };
 }
 
 /** Monday 2026-03-02, 07:00 in New York. */
