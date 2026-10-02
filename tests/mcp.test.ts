@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createApiKey } from "../src/auth.ts";
 import type { Db } from "../src/db.ts";
+import { TOOLS } from "../src/mcp.ts";
 import { handleMcp } from "../src/worker.ts";
 import { createFixture, NOW, type Fixture } from "./helpers.ts";
 
@@ -219,6 +220,56 @@ describe("audit log", () => {
       idempotencyKey: "mcp-audit-0001",
     });
     expect(JSON.stringify(rows)).not.toMatch(/sam@example\.com|Sam Rivera/i);
+  });
+
+  it("records calls rejected before the tool runs, with argument names only", async () => {
+    const reader = await connect(readKey);
+    // Unknown and out-of-scope tools come back as JSON-RPC errors, which the client throws.
+    await expect(reader.callTool({ name: "hold_slot", arguments: { customerEmail: "sam@example.com" } })).rejects.toThrow();
+    await expect(reader.callTool({ name: "drop_tables", arguments: {} })).rejects.toThrow();
+    const invalid = await call(await connect(writeKey), "hold_slot", {
+      serviceId: f.serviceId,
+      start: "2026-03-06T14:00:00Z",
+      customer_email: "sam@example.com",
+      customer: { name: "Sam Rivera" },
+      idempotencyKey: "mcp-audit-0002",
+    });
+    expect(invalid.isError).toBe(true);
+
+    const rows = await auditRows();
+    expect(rows.map((r) => [r.tool, r.result_code])).toEqual([
+      ["hold_slot", "scope_denied"],
+      ["drop_tables", "unknown_tool"],
+      ["hold_slot", "invalid_arguments"],
+    ]);
+    expect(rows[2]!.inputs).toEqual({
+      serviceId: "[redacted]",
+      start: "[redacted]",
+      customer_email: "[redacted]",
+      customer: "[redacted]",
+      idempotencyKey: "[redacted]",
+    });
+    expect(JSON.stringify(rows)).not.toMatch(/sam@example\.com|Sam Rivera/i);
+  });
+
+  it("audits a valid call once, and a call without arguments the way the SDK validates it", async () => {
+    const client = await connect(readKey);
+    await call(client, "list_services");
+    // No arguments at all: the SDK validates `{}`, which search_availability rejects.
+    const missing = (await client.callTool({ name: "search_availability" })) as ToolResult;
+    expect(missing.isError).toBe(true);
+    expect((await auditRows()).map((r) => [r.tool, r.result_code])).toEqual([
+      ["list_services", "ok"],
+      ["search_availability", "invalid_arguments"],
+    ]);
+  });
+
+  it("knows the same tools and scopes the servers list", async () => {
+    const names = async (key: string) => (await (await connect(key)).listTools()).tools.map((t) => t.name).sort();
+    const byScope = (scopes: string[]) =>
+      Object.entries(TOOLS).filter(([, t]) => scopes.includes(t.scope)).map(([name]) => name).sort();
+    expect(await names(readKey)).toEqual(byScope(["read"]));
+    expect(await names(writeKey)).toEqual(byScope(["read", "write"]));
   });
 
   it("still returns the tool result if the audit write fails", async () => {
