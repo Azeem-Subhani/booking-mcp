@@ -36,6 +36,17 @@ async function untilSomeoneWaitsOnALock() {
 const hold = (db: Db, extra: Partial<ReturnType<typeof customer>> = {}) =>
   holdSlot(db, f.tenantId, { serviceId: f.serviceId, start: FRI_9AM, ...customer(), ...extra }, NOW);
 
+/**
+ * Captures a pending call's outcome immediately. Session B's call can settle as soon as A commits,
+ * before the test resumes after `await a.query("COMMIT")`; a rejection with no handler attached yet
+ * is reported as unhandled and fails the run.
+ */
+const settle = <T>(promise: Promise<T>) =>
+  promise.then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+
 describe.skipIf(!usingServer)("concurrent sessions (real Postgres)", () => {
   it("lets exactly one of two concurrent holds on the same slot through", async () => {
     await a.query("BEGIN");
@@ -43,11 +54,11 @@ describe.skipIf(!usingServer)("concurrent sessions (real Postgres)", () => {
     expect(first.status).toBe("held");
 
     // B finds nothing committed, so only the exclusion constraint can stop it.
-    const second = hold(b, { customerEmail: "second@example.com" });
+    const second = settle(hold(b, { customerEmail: "second@example.com" }));
     await untilSomeoneWaitsOnALock();
     await a.query("COMMIT");
 
-    await expect(second).rejects.toMatchObject({ code: "slot_unavailable" });
+    expect(await second).toMatchObject({ ok: false, error: { code: "slot_unavailable" } });
     const rows = await f.db.query<{ customer_email: string }>(
       `SELECT customer_email FROM bookings WHERE status IN ('held', 'confirmed')`,
     );
@@ -58,11 +69,11 @@ describe.skipIf(!usingServer)("concurrent sessions (real Postgres)", () => {
     await a.query("BEGIN");
     await hold(a, { customerEmail: "first@example.com" });
 
-    const second = hold(b, { customerEmail: "second@example.com" });
+    const second = settle(hold(b, { customerEmail: "second@example.com" }));
     await untilSomeoneWaitsOnALock();
     await a.query("ROLLBACK");
 
-    await expect(second).resolves.toMatchObject({ status: "held", customerEmail: "second@example.com" });
+    expect(await second).toMatchObject({ ok: true, value: { status: "held", customerEmail: "second@example.com" } });
   });
 
   it("returns the same hold to a concurrent retry with the same idempotency key", async () => {
@@ -71,11 +82,11 @@ describe.skipIf(!usingServer)("concurrent sessions (real Postgres)", () => {
     const first = await hold(a, attempt);
 
     // Same key: B blocks on the unique index, then takes the "a concurrent retry won" path.
-    const retry = hold(b, attempt);
+    const retry = settle(hold(b, attempt));
     await untilSomeoneWaitsOnALock();
     await a.query("COMMIT");
 
-    expect((await retry).id).toBe(first.id);
+    expect(await retry).toMatchObject({ ok: true, value: { id: first.id } });
     const [row] = await f.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM bookings`);
     expect(row!.n).toBe(1);
   });
