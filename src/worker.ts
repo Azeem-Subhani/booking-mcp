@@ -5,6 +5,7 @@ import { authenticate } from "./auth.ts";
 import { neonDb, type Db } from "./db.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { checkRateLimit, rateLimitedResponse } from "./ratelimit.ts";
+import { resetSandbox } from "./reset.ts";
 
 export interface Env {
   DATABASE_URL: string;
@@ -35,5 +36,11 @@ export default {
     if (pathname === "/mcp") return handleMcp(request, db);
     if (pathname.startsWith("/api/")) return createApi({ db }).fetch(request);
     return new Response("Not found", { status: 404 });
+  },
+
+  /** Cron Trigger (see wrangler.jsonc): nightly sandbox reset. Throwing marks the run as failed. */
+  async scheduled(controller: { scheduledTime: number }, env: Env): Promise<void> {
+    const result = await resetSandbox(neonDb(env.DATABASE_URL), new Date(controller.scheduledTime));
+    console.log("Sandbox reset", result);
   },
 };
