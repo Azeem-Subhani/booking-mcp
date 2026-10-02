@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
+import { recordToolCall } from "./audit.ts";
 import { hasScope, type Principal } from "./auth.ts";
 import type { Db } from "./db.ts";
 import {
@@ -39,6 +40,20 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
   const { tenantId } = principal;
   const server = new McpServer({ name: "booking-mcp", version: "0.2.0" }, { instructions: INSTRUCTIONS });
 
+  /** Runs a tool body, then records the call in the audit log. */
+  const audited = async (tool: string, inputs: Record<string, unknown>, body: () => Promise<Record<string, unknown>>) => {
+    const started = performance.now();
+    const { result, code } = await run(body);
+    try {
+      await recordToolCall(db, principal, { tool, inputs, resultCode: code, durationMs: performance.now() - started, at: now() });
+    } catch (error) {
+      // The tool has already run (a booking may exist), so failing the call here would mislead the
+      // client. Log loudly instead; observability alerts on this message.
+      console.error("Audit log write failed", { tool, keyId: principal.keyId, error: String(error) });
+    }
+    return result;
+  };
+
   server.registerResource(
     "policies",
     "booking://policies",
@@ -55,7 +70,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       description: "List bookable services with duration and price (in cents).",
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async () => run(async () => ({ services: await listServices(db, tenantId) })),
+    async () => audited("list_services", {}, async () => ({ services: await listServices(db, tenantId) })),
   );
 
   server.registerTool(
@@ -70,7 +85,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async (input) => run(async () => ({ slots: await searchAvailability(db, tenantId, input, now()) })),
+    async (input) => audited("search_availability", input, async () => ({ slots: await searchAvailability(db, tenantId, input, now()) })),
   );
 
   server.registerTool(
@@ -81,7 +96,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       inputSchema: z.object({ bookingId }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ bookingId: id }) => run(async () => ({ booking: await getBooking(db, tenantId, id) })),
+    async ({ bookingId: id }) => audited("get_booking", { bookingId: id }, async () => ({ booking: await getBooking(db, tenantId, id) })),
   );
 
   if (!hasScope(principal, "write")) return server;
@@ -96,7 +111,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       inputSchema: z.object({ email: z.email().describe("Customer email address.") }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ email }) => run(async () => ({ bookings: await findBookingsByEmail(db, tenantId, email) })),
+    async ({ email }) => audited("find_bookings_by_email", { email }, async () => ({ bookings: await findBookingsByEmail(db, tenantId, email) })),
   );
 
   server.registerTool(
@@ -113,7 +128,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => run(async () => ({ booking: await holdSlot(db, tenantId, input, now()) })),
+    async (input) => audited("hold_slot", input, async () => ({ booking: await holdSlot(db, tenantId, input, now()) })),
   );
 
   server.registerTool(
@@ -124,7 +139,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       inputSchema: z.object({ bookingId }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ bookingId: id }) => run(async () => ({ booking: await confirmBooking(db, tenantId, id, now()) })),
+    async ({ bookingId: id }) => audited("confirm_booking", { bookingId: id }, async () => ({ booking: await confirmBooking(db, tenantId, id, now()) })),
   );
 
   server.registerTool(
@@ -136,7 +151,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ bookingId: id, start }) =>
-      run(async () => ({ booking: await rescheduleBooking(db, tenantId, { bookingId: id, start }, now()) })),
+      audited("reschedule_booking", { bookingId: id, start }, async () => ({ booking: await rescheduleBooking(db, tenantId, { bookingId: id, start }, now()) })),
   );
 
   server.registerTool(
@@ -147,31 +162,33 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       inputSchema: z.object({ bookingId }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ bookingId: id }) => run(async () => ({ booking: await cancelBooking(db, tenantId, id, now()) })),
+    async ({ bookingId: id }) => audited("cancel_booking", { bookingId: id }, async () => ({ booking: await cancelBooking(db, tenantId, id, now()) })),
   );
 
   return server;
 }
 
 /**
- * Runs a tool body and shapes the result. Expected failures come back as tool errors with
- * a stable code so the model can recover. Anything else is logged and returned generically,
- * so database details never reach the model.
+ * Runs a tool body and shapes the result, plus a result code for the audit log. Expected failures
+ * come back as tool errors with a stable code so the model can recover. Anything else is logged and
+ * returned generically, so database details never reach the model.
  */
 async function run(body: () => Promise<Record<string, unknown>>) {
   try {
     const data = await body();
-    return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], structuredContent: data };
+    const result = { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }], structuredContent: data };
+    return { result, code: "ok" };
   } catch (error) {
     const known = error instanceof DomainError;
     if (!known) console.error("Unhandled MCP tool error", error);
     const detail = known
       ? { code: error.code, message: error.message }
       : { code: "internal", message: "Something went wrong. Try again later." };
-    return {
+    const result = {
       isError: true,
       content: [{ type: "text" as const, text: `${detail.code}: ${detail.message}` }],
       structuredContent: { error: detail },
     };
+    return { result, code: detail.code };
   }
 }

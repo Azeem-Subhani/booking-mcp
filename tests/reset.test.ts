@@ -41,4 +41,17 @@ describe("nightly sandbox reset", () => {
     expect(await count(`api_key_usage WHERE window_start < $1`, ["2026-03-01T00:00:00Z"])).toBe(0);
     expect(await count(`api_key_usage`)).toBe(4);
   });
+
+  it("drops audit rows older than 30 days", async () => {
+    const { id } = await createApiKey(f.db, { tenantId: f.tenantId, scope: "read", label: "k" });
+    for (const days of [31, 29]) {
+      await f.db.query(
+        `INSERT INTO audit_log (tenant_id, key_id, tool, inputs, result_code, duration_ms, created_at)
+         VALUES ($1, $2, 'list_services', '{}', 'ok', 1, $3)`,
+        [f.tenantId, id, new Date(NOW.getTime() - days * 86_400_000).toISOString()],
+      );
+    }
+    expect(await resetSandbox(f.db, NOW)).toMatchObject({ auditRows: 1 });
+    expect(await count(`audit_log`)).toBe(1);
+  });
 });

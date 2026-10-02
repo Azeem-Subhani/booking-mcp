@@ -2,6 +2,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createApiKey } from "../src/auth.ts";
+import type { Db } from "../src/db.ts";
 import { handleMcp } from "../src/worker.ts";
 import { createFixture, NOW, type Fixture } from "./helpers.ts";
 
@@ -21,13 +22,13 @@ afterEach(async () => {
 });
 
 /** The official MCP client, wired straight to the Worker's MCP handler (no network). */
-async function connect(key: string) {
+async function connect(key: string, db: Db = f.db) {
   const client = new Client({ name: "test", version: "0.0.0" });
   const transport = new StreamableHTTPClientTransport(new URL("http://booking.test/mcp"), {
     fetch: (input, init) => {
       const request = new Request(input, init);
       request.headers.set("Authorization", `Bearer ${key}`);
-      return handleMcp(request, f.db, () => NOW);
+      return handleMcp(request, db, () => NOW);
     },
   });
   await client.connect(transport);
@@ -154,5 +155,52 @@ describe("errors", () => {
     const id = (mine.structuredContent?.booking as { id: string }).id;
     const peek = await call(await connect(otherKey), "get_booking", { bookingId: id });
     expect(peek.structuredContent).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("audit log", () => {
+  type AuditRow = { tool: string; inputs: Record<string, unknown>; result_code: string; key_id: string };
+  const auditRows = () =>
+    f.db.query<AuditRow>(`SELECT tool, inputs, result_code, key_id::text FROM audit_log ORDER BY id`);
+
+  it("records every tool call with the key, outcome, and redacted inputs", async () => {
+    const [keyRow] = await f.db.query<{ id: string }>(`SELECT id FROM api_keys WHERE label = 'mcp write'`);
+    const client = await connect(writeKey);
+    await call(client, "list_services");
+    await call(client, "hold_slot", {
+      serviceId: f.serviceId,
+      start: "2026-03-06T14:00:00Z",
+      customerName: "Sam Rivera",
+      customerEmail: "sam@example.com",
+      idempotencyKey: "mcp-audit-0001",
+    });
+    await call(client, "find_bookings_by_email", { email: "sam@example.com" });
+    await call(client, "confirm_booking", { bookingId: "00000000-0000-4000-8000-000000000000" });
+
+    const rows = await auditRows();
+    expect(rows.map((r) => [r.tool, r.result_code])).toEqual([
+      ["list_services", "ok"],
+      ["hold_slot", "ok"],
+      ["find_bookings_by_email", "ok"],
+      ["confirm_booking", "not_found"],
+    ]);
+    expect(rows.every((r) => r.key_id === keyRow!.id)).toBe(true);
+    expect(rows[1]!.inputs).toMatchObject({
+      customerName: "[redacted]",
+      customerEmail: "[redacted]",
+      idempotencyKey: "mcp-audit-0001",
+    });
+    expect(JSON.stringify(rows)).not.toMatch(/sam@example\.com|Sam Rivera/i);
+  });
+
+  it("still returns the tool result if the audit write fails", async () => {
+    const failingAudit: Db = {
+      query: (text, params) =>
+        text.includes("INSERT INTO audit_log") ? Promise.reject(new Error("audit down")) : f.db.query(text, params),
+    };
+    const client = await connect(readKey, failingAudit);
+    const result = await call(client, "list_services");
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent?.services).toHaveLength(1);
   });
 });
