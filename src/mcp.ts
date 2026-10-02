@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { recordToolCall } from "./audit.ts";
-import { hasScope, type Principal } from "./auth.ts";
+import { hasScope, type Principal, type Scope } from "./auth.ts";
 import type { Db } from "./db.ts";
 import {
   type Booking,
@@ -52,6 +52,23 @@ const holdInput = z.object({
   idempotencyKey: z.string().min(8).max(200).describe("Unique per booking attempt, e.g. a UUID you generate."),
 });
 const rescheduleInput = z.object({ bookingId, start: instant });
+
+/**
+ * Every tool's required scope and input schema (the same schema objects registered below). The
+ * HTTP layer uses this to audit calls the SDK rejects before a tool body runs; a test checks it
+ * matches what each scope's server actually lists.
+ */
+export const TOOLS: Record<string, { scope: Scope; input?: z.ZodType }> = {
+  get_policies: { scope: "read" },
+  list_services: { scope: "read" },
+  search_availability: { scope: "read", input: searchInput },
+  get_booking: { scope: "read", input: bookingIdInput },
+  find_bookings_by_email: { scope: "write", input: emailInput },
+  hold_slot: { scope: "write", input: holdInput },
+  confirm_booking: { scope: "write", input: bookingIdInput },
+  reschedule_booking: { scope: "write", input: rescheduleInput },
+  cancel_booking: { scope: "write", input: bookingIdInput },
+};
 
 /**
  * Builds one MCP server for an authenticated API key. Write tools are only registered for
@@ -200,6 +217,53 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
   );
 
   return server;
+}
+
+/** Caps on caller-supplied strings stored for rejected calls. */
+const MAX_AUDITED_NAME = 100;
+const MAX_AUDITED_ARGS = 20;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Audits tools/call requests the SDK rejects before any tool body runs, so they never reach
+ * `audited`: an unknown tool, a tool above the key's scope, or arguments that fail the schema.
+ * Only argument names are stored. The schema didn't run, so nothing was stripped, and a misspelled
+ * field (say customer_email) could carry PII the redaction list wouldn't recognize.
+ * This only observes; the SDK still handles the request and builds the response.
+ */
+export async function auditRejectedToolCalls(db: Db, principal: Principal, body: unknown, at: Date): Promise<void> {
+  for (const message of Array.isArray(body) ? body : [body]) {
+    if (!isRecord(message) || message.method !== "tools/call" || !isRecord(message.params)) continue;
+    const { name, arguments: args } = message.params;
+    if (typeof name !== "string") continue; // malformed request, rejected by the SDK's protocol checks
+    const code = rejectionCode(principal, name, args);
+    if (!code) continue;
+    const tool = name.slice(0, MAX_AUDITED_NAME);
+    const argNames = isRecord(args) ? Object.keys(args).slice(0, MAX_AUDITED_ARGS) : [];
+    try {
+      await recordToolCall(db, principal, {
+        tool,
+        inputs: Object.fromEntries(argNames.map((arg) => [arg.slice(0, MAX_AUDITED_NAME), "[redacted]"])),
+        resultCode: code,
+        durationMs: 0,
+        at,
+      });
+    } catch (error) {
+      // Same as `audited`: never fail the request over the audit log.
+      console.error("Audit log write failed", { tool, keyId: principal.keyId, error: String(error) });
+    }
+  }
+}
+
+function rejectionCode(principal: Principal, name: string, args: unknown): string | null {
+  const tool = Object.hasOwn(TOOLS, name) ? TOOLS[name] : undefined;
+  if (!tool) return "unknown_tool";
+  if (!hasScope(principal, tool.scope)) return "scope_denied";
+  // Same schema and the same `?? {}` default as the SDK, so both agree on what's invalid.
+  if (tool.input && !tool.input.safeParse(args ?? {}).success) return "invalid_arguments";
+  return null;
 }
 
 /**

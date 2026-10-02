@@ -2,7 +2,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import { createApi } from "./api.ts";
 import { neonDb, type Db } from "./db.ts";
-import { buildMcpServer } from "./mcp.ts";
+import { auditRejectedToolCalls, buildMcpServer } from "./mcp.ts";
 import { authorizeRequest, rateLimitedResponse } from "./ratelimit.ts";
 import { resetSandbox } from "./reset.ts";
 
@@ -23,6 +23,12 @@ export async function handleMcp(request: Request, db: Db, now?: () => Date) {
   if (!auth) return unauthorized();
   if (!auth.limit.ok) return rateLimitedResponse(auth.limit);
   const { principal } = auth;
+  // Calls the SDK rejects before a tool runs never reach the audit wrapper in mcp.ts, so check a
+  // copy of the body here. Unparseable bodies are left for the SDK to reject.
+  if (request.method === "POST") {
+    const body = await request.clone().json().catch(() => null);
+    await auditRejectedToolCalls(db, principal, body, now ? now() : new Date());
+  }
   // Stateless serving: a fresh handler per request, scoped to this key's tenant and permissions.
   const handler = createMcpHandler(() => buildMcpServer({ db, principal, ...(now ? { now } : {}) }));
   return handler.fetch(request);

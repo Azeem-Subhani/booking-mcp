@@ -126,7 +126,7 @@ holds the connection string.
 | Authentication | API keys are stored only as SHA-256 hashes, and each raw key is shown once at creation. Unknown and revoked keys get 401. |
 | Authorization | Each key is read or write and bound to one tenant. Write tools aren't registered for read keys, and every query is scoped by tenant. |
 | Rate limiting | Fixed-window counters in Postgres: a per-minute limit on every key, plus an optional daily cap (resets 00:00 UTC). Over the limit returns 429 with `Retry-After`. The key lookup and the count are one statement. |
-| Audit | Every MCP tool call records the key, tool, inputs, result code, and duration. Customer names and emails are redacted before storage. Rows are kept for 30 days. |
+| Audit | Every MCP tool call records the key, tool, inputs, result code, and duration. Customer names and emails are redacted before storage. Calls rejected before the tool runs (`unknown_tool`, `scope_denied`, `invalid_arguments`) are recorded too, with argument names only. Rows are kept for 30 days. |
 | Sandbox reset | A Cron Trigger at 08:00 UTC deletes the demo tenant's bookings and prunes old counters and audit rows, in one statement. |
 | Secrets | `DATABASE_URL` is a Worker secret. Local secrets live in `.dev.vars` (gitignored), and the scripts never print them. |
 
@@ -201,8 +201,8 @@ CI runs two jobs on every PR and push to `main`, and both must pass before mergi
   16 ms measured). Every request has succeeded so far, but Cloudflare doesn't document how much leeway
   the Free plan allows.
 - **Shared demo key.** The public demo key is shared, so one user can use up its daily cap for everyone.
-- **Audit gaps.** Calls rejected by schema validation, and calls to tools a key doesn't have, aren't
-  audited yet.
+- **Audit gap over stdio.** Rejected calls are audited on the HTTP endpoint only. The stdio entry
+  (local, holding the database URL) audits calls that reach a tool, but not ones the SDK rejects first.
 - **Driver coverage.** CI tests a real Postgres server but not Neon's HTTP driver. That path was checked
   end to end against Neon before deploying.
 - **No payments yet.** `create_payment_link` (Stripe test mode) is planned. Group classes are out of
