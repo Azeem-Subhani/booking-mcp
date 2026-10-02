@@ -5,11 +5,14 @@
   "scripts": {
     "test": "vitest run",
     "lint": "eslint .",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "smoke": "node scripts/smoke-worker.ts"
   },
   "type": "module",
   "private": true,
   "dependencies": {
+    "@modelcontextprotocol/hono": "2.0.1",
+    "@modelcontextprotocol/server": "2.2.0",
     "@neondatabase/serverless": "1.2.0",
     "hono": "4.13.12",
     "zod": "4.6.5"
@@ -17,10 +20,12 @@
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
     "@eslint/js": "10.0.1",
+    "@modelcontextprotocol/client": "2.2.0",
     "eslint": "10.11.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "wrangler": "4.147.0"
   },
   "license": "MIT"
 }

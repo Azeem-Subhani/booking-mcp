@@ -8,8 +8,8 @@ import {
   HOLD_MINUTES,
   holdSlot,
   rescheduleBooking,
-} from "../src/domain/bookings";
-import { createFixture, customer, minutesAfter, NOW, type Fixture } from "./helpers";
+} from "../src/domain/bookings.ts";
+import { createFixture, customer, minutesAfter, NOW, type Fixture } from "./helpers.ts";
 
 let f: Fixture;
 beforeEach(async () => {

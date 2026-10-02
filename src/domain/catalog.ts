@@ -1,6 +1,6 @@
-import type { Db } from "../db";
-import { DomainError } from "./errors";
-import { iso } from "./sql";
+import type { Db } from "../db.ts";
+import { DomainError } from "./errors.ts";
+import { iso } from "./sql.ts";
 
 export interface Service {
   id: string;

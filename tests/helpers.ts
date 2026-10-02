@@ -2,7 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
 
 import initSql from "../db/migrations/0001_init.sql?raw";
-import type { Db } from "../src/db";
+import type { Db } from "../src/db.ts";
 
 export interface Fixture {
   db: Db;

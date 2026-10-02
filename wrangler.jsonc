@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "booking-mcp",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-30",
+  // Free plan: keep usage observable so limits are visible before they bite.
+  "observability": { "enabled": true }
+}

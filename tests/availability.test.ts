@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { holdSlot, confirmBooking } from "../src/domain/bookings";
-import { listServices, searchAvailability } from "../src/domain/catalog";
-import { createFixture, customer, minutesAfter, NOW, type Fixture } from "./helpers";
+import { holdSlot, confirmBooking } from "../src/domain/bookings.ts";
+import { listServices, searchAvailability } from "../src/domain/catalog.ts";
+import { createFixture, customer, minutesAfter, NOW, type Fixture } from "./helpers.ts";
 
 let f: Fixture;
 beforeEach(async () => {
