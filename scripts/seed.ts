@@ -1,8 +1,8 @@
 // Seeds the demo tenant on the Neon database in DATABASE_URL and creates the demo API keys.
 //   npm run seed
 // Raw keys are appended to .dev.vars as DEMO_READ_KEY / DEMO_WRITE_KEY and never printed.
-// Safe to re-run: the tenant is only seeded once, and a key is only created if .dev.vars
-// doesn't already hold a valid one.
+// Safe to re-run: the tenant is only seeded once, a key is only created if .dev.vars doesn't
+// already hold a valid one, and each key's rate limits are (re)applied. Needs migration 0002.
 import { authenticate, createApiKey, type Scope } from "../src/auth.ts";
 import { neonDb } from "../src/db.ts";
 import { seedDemoTenant } from "../src/seed.ts";
@@ -20,9 +20,10 @@ declare const process: {
 };
 
 const VARS_FILE = ".dev.vars";
-const KEYS: { name: string; scope: Scope; label: string }[] = [
-  { name: "DEMO_READ_KEY", scope: "read", label: "Public demo (read)" },
-  { name: "DEMO_WRITE_KEY", scope: "write", label: "Owner testing (write)" },
+// The public demo key is shared, so it also gets a daily cap (resets at 00:00 UTC).
+const KEYS: { name: string; scope: Scope; label: string; perMinute: number; daily: number | null }[] = [
+  { name: "DEMO_READ_KEY", scope: "read", label: "Public demo (read)", perMinute: 30, daily: 1000 },
+  { name: "DEMO_WRITE_KEY", scope: "write", label: "Owner testing (write)", perMinute: 60, daily: null },
 ];
 
 const fs = process.getBuiltinModule("node:fs");
@@ -42,15 +43,25 @@ if (!url) {
     for (const spec of KEYS) {
       const current = process.env[spec.name];
       const principal = current ? await authenticate(db, current) : null;
+      let keyId: string;
       if (principal?.tenantId === tenantId && principal.scope === spec.scope) {
+        keyId = principal.keyId;
         console.log(`${spec.name}: already valid, kept.`);
-        continue;
+      } else {
+        const { id, key } = await createApiKey(db, { tenantId, scope: spec.scope, label: spec.label });
+        // A later line wins when the file is loaded, so a stale value above is harmless.
+        const text = fs.readFileSync(VARS_FILE, "utf8");
+        fs.appendFileSync(VARS_FILE, `${text === "" || text.endsWith("\n") ? "" : "\n"}${spec.name}=${key}\n`);
+        console.log(`${spec.name}: created ${spec.scope} key ${id}, written to ${VARS_FILE}.`);
+        keyId = id;
       }
-      const { id, key } = await createApiKey(db, { tenantId, scope: spec.scope, label: spec.label });
-      // A later line wins when the file is loaded, so a stale value above is harmless.
-      const text = fs.readFileSync(VARS_FILE, "utf8");
-      fs.appendFileSync(VARS_FILE, `${text === "" || text.endsWith("\n") ? "" : "\n"}${spec.name}=${key}\n`);
-      console.log(`${spec.name}: created ${spec.scope} key ${id}, written to ${VARS_FILE}.`);
+      // Re-applied every run, so changing the limits above and re-running updates existing keys.
+      await db.query(`UPDATE api_keys SET rate_limit_per_minute = $2, daily_limit = $3 WHERE id = $1`, [
+        keyId,
+        spec.perMinute,
+        spec.daily,
+      ]);
+      console.log(`${spec.name}: limits ${spec.perMinute}/min, ${spec.daily ?? "no"} daily cap.`);
     }
   } catch (error) {
     // Message only: the error object can carry connection config.

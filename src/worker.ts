@@ -4,6 +4,7 @@ import { createApi } from "./api.ts";
 import { authenticate } from "./auth.ts";
 import { neonDb, type Db } from "./db.ts";
 import { buildMcpServer } from "./mcp.ts";
+import { checkRateLimit, rateLimitedResponse } from "./ratelimit.ts";
 
 export interface Env {
   DATABASE_URL: string;
@@ -20,6 +21,8 @@ export async function handleMcp(request: Request, db: Db, now?: () => Date) {
   const header = request.headers.get("Authorization") ?? "";
   const principal = header.startsWith("Bearer ") ? await authenticate(db, header.slice(7)) : null;
   if (!principal) return unauthorized();
+  const limit = await checkRateLimit(db, principal.keyId, now ? now() : new Date());
+  if (!limit.ok) return rateLimitedResponse(limit);
   // Stateless serving: a fresh handler per request, scoped to this key's tenant and permissions.
   const handler = createMcpHandler(() => buildMcpServer({ db, principal, ...(now ? { now } : {}) }));
   return handler.fetch(request);

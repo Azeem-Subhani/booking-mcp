@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { authenticate, hasScope, type Principal, type Scope } from "./auth.ts";
 import type { Db } from "./db.ts";
+import { checkRateLimit, rateLimitedResponse } from "./ratelimit.ts";
 import {
   cancelBooking,
   confirmBooking,
@@ -64,6 +65,8 @@ export function createApi({ db, now = () => new Date() }: ApiDeps) {
     if (!principal) {
       return c.json({ error: { code: "unauthorized", message: "Missing or invalid API key." } }, 401);
     }
+    const limit = await checkRateLimit(db, principal.keyId, now());
+    if (!limit.ok) return rateLimitedResponse(limit);
     c.set("principal", principal);
     await next();
   });
