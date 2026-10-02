@@ -62,6 +62,10 @@ a one-method interface, so the same code runs on Neon in production and on PGlit
 Every request needs an API key, sent as `Authorization: Bearer <key>`. Keys are scoped to one tenant and
 are either read or write.
 
+**Try the live demo:** a read-only demo key (30 requests a minute, 1,000 a day, shared by everyone) is
+published on the case study on [my portfolio](https://azeem-subhani.vercel.app/projects). It's kept out
+of this repository on purpose.
+
 **Claude Code** (remote, over HTTP):
 
 ```bash
