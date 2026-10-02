@@ -6,7 +6,9 @@
     "test": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc -p .",
-    "smoke": "node scripts/smoke-worker.ts"
+    "smoke": "node scripts/smoke-worker.ts",
+    "migrate": "node scripts/migrate.ts",
+    "seed": "node scripts/seed.ts"
   },
   "type": "module",
   "private": true,

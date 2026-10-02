@@ -1,8 +1,18 @@
 import { PGlite } from "@electric-sql/pglite";
 import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
 
-import initSql from "../db/migrations/0001_init.sql?raw";
 import type { Db } from "../src/db.ts";
+import { applyMigrations, type Migration, type MigrationConn } from "../src/migrate.ts";
+
+/** Every file in db/migrations, so new migrations reach the tests without editing this helper. */
+export const MIGRATIONS: Migration[] = Object.entries(
+  import.meta.glob<string>("../db/migrations/*.sql", { query: "?raw", import: "default", eager: true }),
+).map(([path, sql]) => ({ name: path.slice(path.lastIndexOf("/") + 1), sql }));
+
+export const pgliteConn = (pg: PGlite): MigrationConn => ({
+  exec: async (sql) => void (await pg.exec(sql)),
+  query: async <T>(text: string, params?: unknown[]) => (await pg.query<T>(text, params)).rows,
+});
 
 export interface Fixture {
   db: Db;
@@ -21,7 +31,7 @@ export async function createFixture(): Promise<Fixture> {
   const pg = await PGlite.create({ extensions: { btree_gist } });
   // Neon sessions default to UTC. PGlite's default differs, so pin it to match production.
   await pg.exec(`SET TIME ZONE 'UTC';`);
-  await pg.exec(initSql);
+  await applyMigrations(pgliteConn(pg), MIGRATIONS);
   const db: Db = { query: async <T>(text: string, params?: unknown[]) => (await pg.query<T>(text, params)).rows };
 
   const [tenant] = await db.query<{ id: string }>(

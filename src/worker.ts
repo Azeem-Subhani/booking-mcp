@@ -1,9 +1,10 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import { createApi } from "./api.ts";
-import { authenticate } from "./auth.ts";
 import { neonDb, type Db } from "./db.ts";
 import { buildMcpServer } from "./mcp.ts";
+import { authorizeRequest, rateLimitedResponse } from "./ratelimit.ts";
+import { resetSandbox } from "./reset.ts";
 
 export interface Env {
   DATABASE_URL: string;
@@ -18,8 +19,10 @@ const unauthorized = () =>
 /** Serves the MCP endpoint for one request. Exported for tests, which pass a PGlite-backed Db. */
 export async function handleMcp(request: Request, db: Db, now?: () => Date) {
   const header = request.headers.get("Authorization") ?? "";
-  const principal = header.startsWith("Bearer ") ? await authenticate(db, header.slice(7)) : null;
-  if (!principal) return unauthorized();
+  const auth = header.startsWith("Bearer ") ? await authorizeRequest(db, header.slice(7), now ? now() : new Date()) : null;
+  if (!auth) return unauthorized();
+  if (!auth.limit.ok) return rateLimitedResponse(auth.limit);
+  const { principal } = auth;
   // Stateless serving: a fresh handler per request, scoped to this key's tenant and permissions.
   const handler = createMcpHandler(() => buildMcpServer({ db, principal, ...(now ? { now } : {}) }));
   return handler.fetch(request);
@@ -32,5 +35,11 @@ export default {
     if (pathname === "/mcp") return handleMcp(request, db);
     if (pathname.startsWith("/api/")) return createApi({ db }).fetch(request);
     return new Response("Not found", { status: 404 });
+  },
+
+  /** Cron Trigger (see wrangler.jsonc): nightly sandbox reset. Throwing marks the run as failed. */
+  async scheduled(controller: { scheduledTime: number }, env: Env): Promise<void> {
+    const result = await resetSandbox(neonDb(env.DATABASE_URL), new Date(controller.scheduledTime));
+    console.log("Sandbox reset", result);
   },
 };
