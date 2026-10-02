@@ -1,11 +1,9 @@
-import { PGlite } from "@electric-sql/pglite";
-import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
 import { describe, expect, it } from "vitest";
 
 import { applyMigrations, migrationStatus } from "../src/migrate.ts";
-import { MIGRATIONS, pgliteConn } from "./helpers.ts";
+import { freshDatabase, MIGRATIONS } from "./helpers.ts";
 
-const fresh = async () => pgliteConn(await PGlite.create({ extensions: { btree_gist } }));
+const fresh = async () => (await freshDatabase()).conn;
 
 describe("migrations", () => {
   it("finds the real migration files", () => {

@@ -5,6 +5,8 @@ must stay $0 to run: Cloudflare Workers, Neon free tier, Stripe test mode only.
 
 ## Commands
 - `npm test`: Vitest against in-memory Postgres (PGlite)
+- `npm run test:postgres`: same suite against a real local Postgres 18 (`TEST_DATABASE_URL`, localhost only),
+  one database per test in a non-UTC session time zone. CI runs both.
 - `npm run typecheck`: TypeScript
 - `npm run lint`: ESLint
 - `npm run smoke`: boots the Worker in workerd, no database access

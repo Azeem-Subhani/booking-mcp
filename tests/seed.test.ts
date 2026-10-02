@@ -1,18 +1,14 @@
-import { PGlite } from "@electric-sql/pglite";
-import { btree_gist } from "@electric-sql/pglite/contrib/btree_gist";
 import { describe, expect, it } from "vitest";
 
 import seedSql from "../db/seed.sql?raw";
-import type { Db } from "../src/db.ts";
 import { applyMigrations } from "../src/migrate.ts";
 import { seedDemoTenant } from "../src/seed.ts";
-import { MIGRATIONS, pgliteConn } from "./helpers.ts";
+import { freshDatabase, MIGRATIONS } from "./helpers.ts";
 
 describe("demo seed", () => {
   it("loads the demo tenant once and is a no-op on re-run", async () => {
-    const pg = await PGlite.create({ extensions: { btree_gist } });
-    await applyMigrations(pgliteConn(pg), MIGRATIONS);
-    const db: Db = { query: async <T>(text: string, params?: unknown[]) => (await pg.query<T>(text, params)).rows };
+    const { db, conn } = await freshDatabase();
+    await applyMigrations(conn, MIGRATIONS);
 
     const first = await seedDemoTenant(db, seedSql);
     expect(first.created).toBe(true);

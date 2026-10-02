@@ -4,6 +4,7 @@
   "description": "Booking API and MCP server for appointment-based businesses (fitness studio demo).",
   "scripts": {
     "test": "vitest run",
+    "test:postgres": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc -p .",
     "smoke": "node scripts/smoke-worker.ts",
@@ -24,6 +25,7 @@
     "@eslint/js": "10.0.1",
     "@modelcontextprotocol/client": "2.2.0",
     "eslint": "10.11.0",
+    "pg": "8.23.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0",
     "vitest": "5.0.3",
