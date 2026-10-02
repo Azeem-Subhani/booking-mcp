@@ -8,6 +8,10 @@ Model Context Protocol (MCP). The demo tenant is Northside Studio, a fictional f
 **Live:** `https://booking-mcp.azeemsubhani.workers.dev` (MCP at `/mcp`, REST at `/api/*`). It runs on
 free tiers only: Cloudflare Workers, Neon Postgres, and GitHub Actions.
 
+![Claude books a private yoga session through booking-mcp: it reads the policies, searches availability in the studio's time zone, holds the slot, reads the details back, and confirms only after the customer says yes.](docs/demo.gif)
+
+*A booking in Claude, shown at 3x speed. The customer is fictional.*
+
 ## What this project demonstrates
 
 - **Tools designed for an LLM.** Booking takes two steps, hold then confirm, so the model has to read
@@ -72,7 +76,38 @@ of this repository on purpose.
 claude mcp add --transport http booking https://booking-mcp.azeemsubhani.workers.dev/mcp --header "Authorization: Bearer <your key>"
 ```
 
-**Claude Desktop** (local, over stdio, against your own database). Add this to
+**Claude Desktop, against the live demo** (no database needed). Claude Desktop's config file only
+starts local servers, so [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridges stdio to the
+remote endpoint and adds the key header. Add this to `claude_desktop_config.json` and restart Claude
+Desktop. It needs Node 18 or later.
+
+```json
+{
+  "mcpServers": {
+    "booking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.14.3",
+        "https://booking-mcp.azeemsubhani.workers.dev/mcp",
+        "--header",
+        "Authorization:${AUTH_HEADER}"
+      ],
+      "env": {
+        "AUTH_HEADER": "Bearer <your key>"
+      }
+    }
+  }
+}
+```
+
+- The version is pinned on purpose. `mcp-remote` is a third-party package, and the bridge sees your key.
+- The header has no space after the colon, and the space lives in `AUTH_HEADER` instead. Claude
+  Desktop on Windows doesn't escape spaces inside `args`.
+- With the read-only demo key you get the four read tools: policies, services, availability, and
+  booking lookup. Holding and confirming need a write key, which means running your own copy.
+
+**Claude Desktop, against your own database** (local, over stdio). Add this to
 `claude_desktop_config.json`. It needs Node 24, which runs the TypeScript entry directly.
 
 ```json
