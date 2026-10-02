@@ -5,6 +5,7 @@ import { recordToolCall } from "./audit.ts";
 import { hasScope, type Principal } from "./auth.ts";
 import type { Db } from "./db.ts";
 import {
+  type Booking,
   cancelBooking,
   confirmBooking,
   findBookingsByEmail,
@@ -14,6 +15,7 @@ import {
   rescheduleBooking,
 } from "./domain/bookings.ts";
 import { listServices, MAX_AVAILABILITY_DAYS, searchAvailability } from "./domain/catalog.ts";
+import { withDetails } from "./domain/details.ts";
 import { DomainError } from "./domain/errors.ts";
 import { getPolicies } from "./domain/policies.ts";
 
@@ -73,6 +75,9 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     return result;
   };
 
+  /** Booking plus service name, price, and local times, so the model can read it back as-is. */
+  const detailed = async (booking: Booking) => ({ booking: (await withDetails(db, tenantId, [booking]))[0] });
+
   server.registerResource(
     "policies",
     "booking://policies",
@@ -129,7 +134,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       inputSchema: bookingIdInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ bookingId: id }) => audited("get_booking", { bookingId: id }, async () => ({ booking: await getBooking(db, tenantId, id) })),
+    async ({ bookingId: id }) => audited("get_booking", { bookingId: id }, async () => detailed(await getBooking(db, tenantId, id))),
   );
 
   if (!hasScope(principal, "write")) return server;
@@ -144,18 +149,20 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       inputSchema: emailInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ email }) => audited("find_bookings_by_email", { email }, async () => ({ bookings: await findBookingsByEmail(db, tenantId, email) })),
+    async ({ email }) => audited("find_bookings_by_email", { email }, async () => ({
+        bookings: await withDetails(db, tenantId, await findBookingsByEmail(db, tenantId, email)),
+      })),
   );
 
   server.registerTool(
     "hold_slot",
     {
       title: "Hold a slot",
-      description: `Reserve a start time for ${HOLD_MINUTES} minutes. This does not book anything yet. If you retry after an error, reuse the same idempotencyKey so you get the same hold back instead of a second one.`,
+      description: `Reserve a start time for ${HOLD_MINUTES} minutes. This does not book anything yet. If you retry after an error, reuse the same idempotencyKey so you get the same hold back instead of a second one. The booking's details carry the service name, price, and local times to read back to the customer.`,
       inputSchema: holdInput,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async (input) => audited("hold_slot", input, async () => ({ booking: await holdSlot(db, tenantId, input, now()) })),
+    async (input) => audited("hold_slot", input, async () => detailed(await holdSlot(db, tenantId, input, now()))),
   );
 
   server.registerTool(
@@ -166,7 +173,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       inputSchema: bookingIdInput,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ bookingId: id }) => audited("confirm_booking", { bookingId: id }, async () => ({ booking: await confirmBooking(db, tenantId, id, now()) })),
+    async ({ bookingId: id }) => audited("confirm_booking", { bookingId: id }, async () => detailed(await confirmBooking(db, tenantId, id, now()))),
   );
 
   server.registerTool(
@@ -178,7 +185,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ bookingId: id, start }) =>
-      audited("reschedule_booking", { bookingId: id, start }, async () => ({ booking: await rescheduleBooking(db, tenantId, { bookingId: id, start }, now()) })),
+      audited("reschedule_booking", { bookingId: id, start }, async () => detailed(await rescheduleBooking(db, tenantId, { bookingId: id, start }, now()))),
   );
 
   server.registerTool(
@@ -189,7 +196,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
       inputSchema: bookingIdInput,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ bookingId: id }) => audited("cancel_booking", { bookingId: id }, async () => ({ booking: await cancelBooking(db, tenantId, id, now()) })),
+    async ({ bookingId: id }) => audited("cancel_booking", { bookingId: id }, async () => detailed(await cancelBooking(db, tenantId, id, now()))),
   );
 
   return server;
