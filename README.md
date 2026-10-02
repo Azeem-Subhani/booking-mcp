@@ -12,7 +12,7 @@ free tiers only: Cloudflare Workers, Neon Postgres, and GitHub Actions.
 
 - **Tools designed for an LLM.** Booking takes two steps, hold then confirm, so the model has to read
   the details back to the customer before anything is final. Expected failures return stable codes the
-  model can act on, and policies come from a resource rather than the model's guesses.
+  model can act on, and policies come from the server rather than the model's guesses.
 - **Rules enforced by the database, not the prompt.** Postgres rejects double-booking with an exclusion
   constraint, however many requests or Worker instances race.
 - **Least privilege per API key.** A read-only key never sees write tools, and looking up a customer by
@@ -97,6 +97,7 @@ holds the connection string.
 
 | Tool | Scope | Annotations |
 |---|---|---|
+| `get_policies` | read | read-only |
 | `list_services` | read | read-only |
 | `search_availability` | read | read-only |
 | `get_booking` | read | read-only |
@@ -106,9 +107,11 @@ holds the connection string.
 | `reschedule_booking` | write | destructive |
 | `cancel_booking` | write | destructive, idempotent |
 
-- **Policies resource:** `booking://policies` gives the model the business's time zone, hold length (10
-  minutes), and cancellation notice (24 hours). The server instructions tell it to quote these rather
-  than invent policies.
+- **Policies:** `get_policies` gives the model the business's time zone, hold length (10 minutes), and
+  cancellation notice (24 hours). The same data is the `booking://policies` resource, but some clients
+  (Claude Desktop among them) only let the user attach resources, so the tool is what the model can
+  reach on its own. `search_availability` also returns `timeZone` next to the UTC slots. The server
+  instructions tell the model to quote these rather than invent policies.
 - **Errors:** expected failures come back as tool errors with a stable code (`slot_unavailable`,
   `hold_expired`, `policy_violation`, ...) so the model can recover, for example by searching again.
   Unexpected errors are logged, and the model gets a generic message with no database details.

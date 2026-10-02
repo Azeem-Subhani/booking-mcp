@@ -24,8 +24,8 @@ export interface McpDeps {
 }
 
 const INSTRUCTIONS = `Book private sessions for one business.
-- Read booking://policies first. Quote its rules; don't invent policies.
-- All instants are ISO 8601 UTC. Show customers times in the business's time zone.
+- Call get_policies first (also available as the booking://policies resource). Quote its rules; don't invent policies.
+- All instants are ISO 8601 UTC. Show customers times in the business's time zone (timeZone in get_policies and search_availability).
 - Booking takes two steps. hold_slot reserves a time for ${HOLD_MINUTES} minutes. Repeat the service, time, and price back to the customer and get a clear yes before calling confirm_booking.
 - If a tool returns slot_unavailable or hold_expired, search availability again rather than retrying the same time.`;
 
@@ -82,6 +82,18 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     }),
   );
 
+  // Same payload as the resource, as a tool: some clients (Claude Desktop among them) only let the
+  // user attach resources, so the model could otherwise never learn the time zone or the rules.
+  server.registerTool(
+    "get_policies",
+    {
+      title: "Get policies",
+      description: "The business's time zone, hold length, and cancellation notice. Read this before quoting times or rules to a customer.",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async () => audited("get_policies", {}, async () => ({ policies: await getPolicies(db, tenantId) })),
+  );
+
   server.registerTool(
     "list_services",
     {
@@ -96,11 +108,17 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     "search_availability",
     {
       title: "Search availability",
-      description: `Free start times for a service. Dates are local to the business (YYYY-MM-DD, inclusive), up to ${MAX_AVAILABILITY_DAYS} days per search. Returned times are UTC.`,
+      description: `Free start times for a service. Dates are local to the business (YYYY-MM-DD, inclusive), up to ${MAX_AVAILABILITY_DAYS} days per search. Returned times are UTC; timeZone is the business's IANA time zone for showing them to customers.`,
       inputSchema: searchInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async (input) => audited("search_availability", input, async () => ({ slots: await searchAvailability(db, tenantId, input, now()) })),
+    async (input) =>
+      audited("search_availability", input, async () => {
+        const slots = await searchAvailability(db, tenantId, input, now());
+        // Without the zone next to the slots, the model can only show customers UTC or guess.
+        const { timeZone } = await getPolicies(db, tenantId);
+        return { timeZone, slots };
+      }),
   );
 
   server.registerTool(

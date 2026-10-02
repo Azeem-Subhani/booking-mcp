@@ -49,7 +49,7 @@ describe("auth and scopes", () => {
 
   it("shows read-only keys only the read tools", async () => {
     const { tools } = await (await connect(readKey)).listTools();
-    expect(tools.map((tool) => tool.name).sort()).toEqual(["get_booking", "list_services", "search_availability"]);
+    expect(tools.map((tool) => tool.name).sort()).toEqual(["get_booking", "get_policies", "list_services", "search_availability"]);
   });
 
   it("shows write keys every tool, with safety annotations", async () => {
@@ -60,6 +60,7 @@ describe("auth and scopes", () => {
       "confirm_booking",
       "find_bookings_by_email",
       "get_booking",
+      "get_policies",
       "hold_slot",
       "list_services",
       "reschedule_booking",
@@ -71,18 +72,25 @@ describe("auth and scopes", () => {
   });
 });
 
-describe("policies resource", () => {
-  it("returns the tenant's rules", async () => {
+describe("policies", () => {
+  const expected = {
+    business: "Northside Studio",
+    timeZone: "America/New_York",
+    holdMinutes: 10,
+    cancellationNoticeHours: 24,
+    slotStepMinutes: 30,
+  };
+
+  it("returns the tenant's rules as a resource", async () => {
     const client = await connect(readKey);
     const result = await client.readResource({ uri: "booking://policies" });
     const first = result.contents[0] as { text: string };
-    expect(JSON.parse(first.text)).toEqual({
-      business: "Northside Studio",
-      timeZone: "America/New_York",
-      holdMinutes: 10,
-      cancellationNoticeHours: 24,
-      slotStepMinutes: 30,
-    });
+    expect(JSON.parse(first.text)).toEqual(expected);
+  });
+
+  it("returns the same rules from the get_policies tool, for clients that don't expose resources to the model", async () => {
+    const result = await call(await connect(readKey), "get_policies");
+    expect(result.structuredContent?.policies).toEqual(expected);
   });
 });
 
@@ -97,6 +105,7 @@ describe("booking flow over MCP", () => {
     const search = await call(client, "search_availability", { serviceId: f.serviceId, from: "2026-03-06", to: "2026-03-06" });
     const [slot] = search.structuredContent?.slots as { start: string }[];
     expect(slot?.start).toBe("2026-03-06T14:00:00Z");
+    expect(search.structuredContent?.timeZone).toBe("America/New_York");
 
     const holdArgs = {
       serviceId: f.serviceId,
