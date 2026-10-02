@@ -1,9 +1,9 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 
-import { authenticate, hasScope, type Principal, type Scope } from "./auth.ts";
+import { hasScope, type Principal, type Scope } from "./auth.ts";
 import type { Db } from "./db.ts";
-import { checkRateLimit, rateLimitedResponse } from "./ratelimit.ts";
+import { authorizeRequest, rateLimitedResponse } from "./ratelimit.ts";
 import {
   cancelBooking,
   confirmBooking,
@@ -61,13 +61,12 @@ export function createApi({ db, now = () => new Date() }: ApiDeps) {
 
   app.use("*", async (c, next) => {
     const header = c.req.header("Authorization") ?? "";
-    const principal = header.startsWith("Bearer ") ? await authenticate(db, header.slice(7)) : null;
-    if (!principal) {
+    const auth = header.startsWith("Bearer ") ? await authorizeRequest(db, header.slice(7), now()) : null;
+    if (!auth) {
       return c.json({ error: { code: "unauthorized", message: "Missing or invalid API key." } }, 401);
     }
-    const limit = await checkRateLimit(db, principal.keyId, now());
-    if (!limit.ok) return rateLimitedResponse(limit);
-    c.set("principal", principal);
+    if (!auth.limit.ok) return rateLimitedResponse(auth.limit);
+    c.set("principal", auth.principal);
     await next();
   });
 

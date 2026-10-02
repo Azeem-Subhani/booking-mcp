@@ -8,7 +8,7 @@ export interface Principal {
   scope: Scope;
 }
 
-const KEY_PREFIX = "bk_";
+export const KEY_PREFIX = "bk_";
 
 /** SHA-256 hex digest via Web Crypto, so it runs unchanged in Workers and Node. */
 export async function hashApiKey(rawKey: string): Promise<string> {

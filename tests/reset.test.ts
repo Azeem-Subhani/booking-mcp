@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { createApiKey } from "../src/auth.ts";
 import { holdSlot } from "../src/domain/bookings.ts";
-import { checkRateLimit } from "../src/ratelimit.ts";
+import { authorizeRequest } from "../src/ratelimit.ts";
 import { resetSandbox } from "../src/reset.ts";
 import { createFixture, customer, NOW, type Fixture } from "./helpers.ts";
 
@@ -30,9 +30,9 @@ describe("nightly sandbox reset", () => {
   });
 
   it("prunes rate-limit counters older than yesterday and keeps the rest", async () => {
-    const { id } = await createApiKey(f.db, { tenantId: f.tenantId, scope: "read", label: "k" });
+    const { key } = await createApiKey(f.db, { tenantId: f.tenantId, scope: "read", label: "k" });
     const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86_400_000);
-    for (const at of [daysAgo(2), daysAgo(1), NOW]) await checkRateLimit(f.db, id, at);
+    for (const at of [daysAgo(2), daysAgo(1), NOW]) await authorizeRequest(f.db, key, at);
     // Each request writes a minute row and a day row.
     expect(await count(`api_key_usage`)).toBe(6);
 

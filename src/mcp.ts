@@ -32,6 +32,25 @@ const INSTRUCTIONS = `Book private sessions for one business.
 const bookingId = z.uuid().describe("Booking ID returned by hold_slot or a lookup.");
 const instant = z.iso.datetime({ offset: true }).describe("Start time, ISO 8601, e.g. 2026-03-06T14:00:00Z.");
 
+// Input schemas are built once per isolate, not per request: a fresh server is built for every
+// request (so each key only sees its tools), but the schemas themselves don't depend on the key.
+const serviceId = z.uuid().describe("Service ID from list_services.");
+const searchInput = z.object({
+  serviceId,
+  from: z.iso.date().describe("First local date to search, YYYY-MM-DD."),
+  to: z.iso.date().describe("Last local date to search, YYYY-MM-DD."),
+});
+const bookingIdInput = z.object({ bookingId });
+const emailInput = z.object({ email: z.email().describe("Customer email address.") });
+const holdInput = z.object({
+  serviceId,
+  start: instant,
+  customerName: z.string().trim().min(1).max(120),
+  customerEmail: z.email().max(254),
+  idempotencyKey: z.string().min(8).max(200).describe("Unique per booking attempt, e.g. a UUID you generate."),
+});
+const rescheduleInput = z.object({ bookingId, start: instant });
+
 /**
  * Builds one MCP server for an authenticated API key. Write tools are only registered for
  * write-scoped keys, so a read-only assistant never sees tools it isn't allowed to call.
@@ -78,11 +97,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     {
       title: "Search availability",
       description: `Free start times for a service. Dates are local to the business (YYYY-MM-DD, inclusive), up to ${MAX_AVAILABILITY_DAYS} days per search. Returned times are UTC.`,
-      inputSchema: z.object({
-        serviceId: z.uuid().describe("Service ID from list_services."),
-        from: z.iso.date().describe("First local date to search, YYYY-MM-DD."),
-        to: z.iso.date().describe("Last local date to search, YYYY-MM-DD."),
-      }),
+      inputSchema: searchInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async (input) => audited("search_availability", input, async () => ({ slots: await searchAvailability(db, tenantId, input, now()) })),
@@ -93,7 +108,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     {
       title: "Get booking",
       description: "Look up one booking by ID.",
-      inputSchema: z.object({ bookingId }),
+      inputSchema: bookingIdInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ bookingId: id }) => audited("get_booking", { bookingId: id }, async () => ({ booking: await getBooking(db, tenantId, id) })),
@@ -108,7 +123,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     {
       title: "Find bookings by email",
       description: "A customer's 20 most recent bookings, matched case-insensitively by email.",
-      inputSchema: z.object({ email: z.email().describe("Customer email address.") }),
+      inputSchema: emailInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ email }) => audited("find_bookings_by_email", { email }, async () => ({ bookings: await findBookingsByEmail(db, tenantId, email) })),
@@ -119,13 +134,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     {
       title: "Hold a slot",
       description: `Reserve a start time for ${HOLD_MINUTES} minutes. This does not book anything yet. If you retry after an error, reuse the same idempotencyKey so you get the same hold back instead of a second one.`,
-      inputSchema: z.object({
-        serviceId: z.uuid().describe("Service ID from list_services."),
-        start: instant,
-        customerName: z.string().trim().min(1).max(120),
-        customerEmail: z.email().max(254),
-        idempotencyKey: z.string().min(8).max(200).describe("Unique per booking attempt, e.g. a UUID you generate."),
-      }),
+      inputSchema: holdInput,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async (input) => audited("hold_slot", input, async () => ({ booking: await holdSlot(db, tenantId, input, now()) })),
@@ -136,7 +145,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     {
       title: "Confirm booking",
       description: "Turn a hold into a confirmed booking. Only call this after the customer has explicitly agreed to the service, time, and price.",
-      inputSchema: z.object({ bookingId }),
+      inputSchema: bookingIdInput,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ bookingId: id }) => audited("confirm_booking", { bookingId: id }, async () => ({ booking: await confirmBooking(db, tenantId, id, now()) })),
@@ -147,7 +156,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     {
       title: "Reschedule booking",
       description: "Move a confirmed booking to a new start time. Not allowed inside the cancellation notice window; see booking://policies.",
-      inputSchema: z.object({ bookingId, start: instant }),
+      inputSchema: rescheduleInput,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ bookingId: id, start }) =>
@@ -159,7 +168,7 @@ export function buildMcpServer({ db, principal, now = () => new Date() }: McpDep
     {
       title: "Cancel booking",
       description: "Cancel a booking or release a hold. Confirmed bookings follow the notice policy. Confirm with the customer first.",
-      inputSchema: z.object({ bookingId }),
+      inputSchema: bookingIdInput,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ bookingId: id }) => audited("cancel_booking", { bookingId: id }, async () => ({ booking: await cancelBooking(db, tenantId, id, now()) })),

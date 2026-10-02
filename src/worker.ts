@@ -1,10 +1,9 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import { createApi } from "./api.ts";
-import { authenticate } from "./auth.ts";
 import { neonDb, type Db } from "./db.ts";
 import { buildMcpServer } from "./mcp.ts";
-import { checkRateLimit, rateLimitedResponse } from "./ratelimit.ts";
+import { authorizeRequest, rateLimitedResponse } from "./ratelimit.ts";
 import { resetSandbox } from "./reset.ts";
 
 export interface Env {
@@ -20,10 +19,10 @@ const unauthorized = () =>
 /** Serves the MCP endpoint for one request. Exported for tests, which pass a PGlite-backed Db. */
 export async function handleMcp(request: Request, db: Db, now?: () => Date) {
   const header = request.headers.get("Authorization") ?? "";
-  const principal = header.startsWith("Bearer ") ? await authenticate(db, header.slice(7)) : null;
-  if (!principal) return unauthorized();
-  const limit = await checkRateLimit(db, principal.keyId, now ? now() : new Date());
-  if (!limit.ok) return rateLimitedResponse(limit);
+  const auth = header.startsWith("Bearer ") ? await authorizeRequest(db, header.slice(7), now ? now() : new Date()) : null;
+  if (!auth) return unauthorized();
+  if (!auth.limit.ok) return rateLimitedResponse(auth.limit);
+  const { principal } = auth;
   // Stateless serving: a fresh handler per request, scoped to this key's tenant and permissions.
   const handler = createMcpHandler(() => buildMcpServer({ db, principal, ...(now ? { now } : {}) }));
   return handler.fetch(request);
