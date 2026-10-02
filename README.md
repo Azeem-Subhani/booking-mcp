@@ -26,35 +26,32 @@ free tiers only: Cloudflare Workers, Neon Postgres, and GitHub Actions.
 ## Architecture
 
 ```mermaid
-flowchart LR
-  subgraph Clients
-    A["MCP client<br/>(Claude Code, agents)"]
-    D["Claude Desktop<br/>(local)"]
-    R[REST client]
+flowchart TB
+  client["MCP client<br/>(Claude Code, agents)"]
+  rest["REST client"]
+  desktop["Claude Desktop"]
+
+  subgraph worker["Cloudflare Worker (free plan)"]
+    auth["Auth + rate limit<br/>(one query)"]
+    mcp["MCP server<br/>(built per request, tools by key scope)"]
+    api["REST API (Hono)"]
+    cron["Nightly reset<br/>(cron, 08:00 UTC)"]
   end
 
-  subgraph CF["Cloudflare Worker (free plan)"]
-    W["worker.ts<br/>auth + rate limit<br/>(one query)"]
-    M["MCP server<br/>built per request,<br/>tools per key scope"]
-    H[Hono REST API]
-    C["Cron 08:00 UTC<br/>sandbox reset"]
-  end
+  stdio["stdio.ts (Node)"]
+  domain["Domain layer<br/>(bookings, availability, policies)"]
+  pg[("Neon Postgres<br/>bookings_no_overlap, usage counters, audit log")]
 
-  S["stdio.ts<br/>(Node)"]
-  DOM["Domain layer<br/>bookings, availability,<br/>policies"]
-  PG[("Neon Postgres<br/>bookings_no_overlap<br/>api_key_usage<br/>audit_log")]
-
-  A -- "Streamable HTTP /mcp<br/>Bearer key" --> W
-  R -- "/api/*<br/>Bearer key" --> W
-  D -- stdio --> S
-  W --> M
-  W --> H
-  M --> DOM
-  H --> DOM
-  S --> M
-  DOM --> PG
-  W --> PG
-  C --> PG
+  client -- "/mcp, Bearer key" --> auth
+  rest -- "/api/*, Bearer key" --> auth
+  auth --> mcp
+  auth --> api
+  desktop -- stdio --> stdio
+  stdio --> mcp
+  mcp --> domain
+  api --> domain
+  domain --> pg
+  cron --> pg
 ```
 
 The domain layer runs unchanged on Workers and Node. It uses only Web APIs, and the database sits behind
