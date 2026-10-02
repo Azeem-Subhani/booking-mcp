@@ -83,7 +83,12 @@ npm test
 npm run typecheck
 npm run lint
 npm run smoke   # boots the Worker in workerd and checks routing
+TEST_DATABASE_URL=postgres://postgres@localhost:5432/postgres npm run test:postgres   # real Postgres 18
 ```
+
+CI runs lint, typecheck, tests and smoke on every PR, plus the full suite against a real Postgres 18
+container. Each test gets its own database with a non-UTC session time zone, so SQL that leans on the
+session TimeZone fails there even though PGlite (UTC) would pass it.
 
 ## Stack
 
