@@ -117,19 +117,38 @@ describe("booking flow over MCP", () => {
     const held = await call(client, "hold_slot", holdArgs);
     const booking = held.structuredContent?.booking as { id: string; status: string };
     expect(booking.status).toBe("held");
+    // Everything the read-back needs, without joining list_services or converting from UTC.
+    expect(held.structuredContent?.booking).toMatchObject({
+      details: {
+        serviceName: "Private yoga",
+        priceCents: 7500,
+        currency: "usd",
+        timeZone: "America/New_York",
+        weekday: "Friday",
+        localStart: "2026-03-06T09:00:00-05:00",
+        localEnd: "2026-03-06T10:00:00-05:00",
+        localHoldExpiresAt: expect.stringMatching(/-05:00$/),
+      },
+    });
 
     // A retry with the same key returns the same hold.
     const retried = await call(client, "hold_slot", holdArgs);
     expect((retried.structuredContent?.booking as { id: string }).id).toBe(booking.id);
 
     const confirmed = await call(client, "confirm_booking", { bookingId: booking.id });
-    expect(confirmed.structuredContent?.booking).toMatchObject({ status: "confirmed" });
+    expect(confirmed.structuredContent?.booking).toMatchObject({
+      status: "confirmed",
+      details: { localStart: "2026-03-06T09:00:00-05:00", localHoldExpiresAt: null },
+    });
 
     const moved = await call(client, "reschedule_booking", { bookingId: booking.id, start: "2026-03-06T15:00:00Z" });
-    expect(moved.structuredContent?.booking).toMatchObject({ start: "2026-03-06T15:00:00Z" });
+    expect(moved.structuredContent?.booking).toMatchObject({
+      start: "2026-03-06T15:00:00Z",
+      details: { localStart: "2026-03-06T10:00:00-05:00" },
+    });
 
     const found = await call(client, "find_bookings_by_email", { email: "SAM@example.com" });
-    expect(found.structuredContent?.bookings).toHaveLength(1);
+    expect(found.structuredContent?.bookings).toMatchObject([{ details: { localStart: "2026-03-06T10:00:00-05:00" } }]);
 
     const cancelled = await call(client, "cancel_booking", { bookingId: booking.id });
     expect(cancelled.structuredContent?.booking).toMatchObject({ status: "cancelled" });

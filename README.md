@@ -112,6 +112,9 @@ holds the connection string.
   (Claude Desktop among them) only let the user attach resources, so the tool is what the model can
   reach on its own. `search_availability` also returns `timeZone` next to the UTC slots. The server
   instructions tell the model to quote these rather than invent policies.
+- **Read-back details:** every booking a tool returns carries `details` with the service name, price,
+  weekday, and local start, end, and hold expiry (with UTC offset), so the model can read a hold back
+  to the customer without joining services or converting from UTC.
 - **Errors:** expected failures come back as tool errors with a stable code (`slot_unavailable`,
   `hold_expired`, `policy_violation`, ...) so the model can recover, for example by searching again.
   Unexpected errors are logged, and the model gets a generic message with no database details.
