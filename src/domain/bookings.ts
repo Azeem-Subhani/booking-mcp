@@ -1,7 +1,7 @@
-import { PG_EXCLUSION_VIOLATION, PG_UNIQUE_VIOLATION, pgErrorCode, type Db } from "../db";
-import { getService } from "./catalog";
-import { DomainError } from "./errors";
-import { BOOKING_COLUMNS, fitsOpeningHours } from "./sql";
+import { PG_EXCLUSION_VIOLATION, PG_UNIQUE_VIOLATION, pgErrorCode, type Db } from "../db.ts";
+import { getService } from "./catalog.ts";
+import { DomainError } from "./errors.ts";
+import { BOOKING_COLUMNS, fitsOpeningHours } from "./sql.ts";
 
 export type BookingStatus = "held" | "confirmed" | "cancelled" | "expired";
 

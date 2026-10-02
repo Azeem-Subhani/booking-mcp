@@ -1,4 +1,4 @@
-import type { Db } from "./db";
+import type { Db } from "./db.ts";
 
 export type Scope = "read" | "write";
 

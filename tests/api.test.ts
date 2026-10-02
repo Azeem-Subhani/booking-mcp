@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { createApi } from "../src/api";
-import { createApiKey } from "../src/auth";
-import { createFixture, NOW, type Fixture } from "./helpers";
+import { createApi } from "../src/api.ts";
+import { createApiKey } from "../src/auth.ts";
+import { createFixture, NOW, type Fixture } from "./helpers.ts";
 
 let f: Fixture;
 let api: ReturnType<typeof createApi>;
@@ -107,5 +107,12 @@ describe("booking flow over HTTP", () => {
   it("returns 404 for an unknown booking", async () => {
     const res = await call("/bookings/00000000-0000-4000-8000-000000000000", { key: readKey });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("customer lookup", () => {
+  it("requires a write key to search bookings by email", async () => {
+    expect((await call("/bookings?email=sam@example.com", { key: readKey })).status).toBe(403);
+    expect((await call("/bookings?email=sam@example.com", { key: writeKey })).status).toBe(200);
   });
 });

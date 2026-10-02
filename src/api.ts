@@ -1,8 +1,8 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 
-import { authenticate, hasScope, type Principal, type Scope } from "./auth";
-import type { Db } from "./db";
+import { authenticate, hasScope, type Principal, type Scope } from "./auth.ts";
+import type { Db } from "./db.ts";
 import {
   cancelBooking,
   confirmBooking,
@@ -10,9 +10,9 @@ import {
   getBooking,
   holdSlot,
   rescheduleBooking,
-} from "./domain/bookings";
-import { listServices, searchAvailability } from "./domain/catalog";
-import { DomainError, type DomainErrorCode } from "./domain/errors";
+} from "./domain/bookings.ts";
+import { listServices, searchAvailability } from "./domain/catalog.ts";
+import { DomainError, type DomainErrorCode } from "./domain/errors.ts";
 
 export interface ApiDeps {
   db: Db;
@@ -83,9 +83,11 @@ export function createApi({ db, now = () => new Date() }: ApiDeps) {
     return c.json({ slots });
   });
 
+  // Write scope: a read-only key shouldn't list someone's bookings from their email address.
   app.get("/bookings", async (c) => {
+    const tenantId = tenant(c, "write");
     const email = parse(z.email(), c.req.query("email"));
-    return c.json({ bookings: await findBookingsByEmail(db, tenant(c, "read"), email) });
+    return c.json({ bookings: await findBookingsByEmail(db, tenantId, email) });
   });
 
   app.get("/bookings/:bookingId", async (c) => {

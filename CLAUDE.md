@@ -1,17 +1,20 @@
 # booking-mcp
 
-Booking API plus (from milestone 2) an MCP server, for a fictional fitness studio. Portfolio project that
+Booking API plus an MCP server, for a fictional fitness studio. Portfolio project that
 must stay $0 to run: Cloudflare Workers, Neon free tier, Stripe test mode only.
 
 ## Commands
 - `npm test`: Vitest against in-memory Postgres (PGlite)
 - `npm run typecheck`: TypeScript
 - `npm run lint`: ESLint
+- `npm run smoke`: boots the Worker in workerd, no database access
 
-Run all three before calling work done.
+Run all four before calling work done.
 
 ## Rules
 - Code in `src/` must stay runtime-neutral (Workers, Node): Web APIs only, no `node:` imports.
+  `src/stdio.ts` is the one Node entry and declares the single global it uses.
+- Write tools are only registered for write-scoped keys. Keep customer lookup by email write-scoped.
 - The database enforces double-booking prevention (`bookings_no_overlap`). Don't move that check into app code.
 - Never depend on the Postgres session TimeZone. Convert with the tenant's `time_zone` explicitly.
 - Pin dependencies to exact versions. TypeScript stays on 6.0.x until typescript-eslint supports 7.

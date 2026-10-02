@@ -8,11 +8,11 @@ export type DomainErrorCode =
 
 /** An expected failure with a stable code that API and MCP layers can map and explain. */
 export class DomainError extends Error {
-  constructor(
-    readonly code: DomainErrorCode,
-    message: string,
-  ) {
+  readonly code: DomainErrorCode;
+
+  constructor(code: DomainErrorCode, message: string) {
     super(message);
     this.name = "DomainError";
+    this.code = code;
   }
 }
