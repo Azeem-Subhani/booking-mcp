@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.wrangler/
+
+# Secrets: never commit
+.env*
+.dev.vars*

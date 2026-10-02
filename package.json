@@ -1,0 +1,26 @@
+{
+  "name": "booking-mcp",
+  "version": "1.0.0",
+  "description": "Booking API and MCP server for appointment-based businesses (fitness studio demo).",
+  "scripts": {
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc -p ."
+  },
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@neondatabase/serverless": "1.2.0",
+    "hono": "4.13.12",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "5.0.3"
+  },
+  "license": "MIT"
+}
